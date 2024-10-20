@@ -1,0 +1,119 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: java-build-pipeline
+  namespace: ci-cd
+spec:
+  tasks:
+    - name: maven-build
+      taskRef:
+        name: maven-build
+      params:
+        - name: url
+          value: "https://github.com/davidezacchino/argocd-springboot-service.git"
+        - name: revision
+          value: "main"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    - name: docker-build
+      taskRef:
+        name: docker-build
+      runAfter:
+        - maven-build
+      params:
+        - name: IMAGE
+          value: "docker-registry.ci-cd.svc.cluster.local:5000/argocd-springboot-service:latest"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+  workspaces:
+    - name: shared-workspace
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: maven-build
+  namespace: ci-cd
+spec:
+  params:
+    - name: url
+      description: The git repository URL to clone
+      type: string
+    - name: revision
+      description: Git revision to checkout (branch, tag, commit SHA)
+      default: "main"
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: clone
+      image: alpine/git
+      script: |
+        cd $(workspaces.source.path)
+        git clone $(params.url) $(workspaces.source.path)
+        git checkout $(params.revision)
+    - name: maven
+      image: maven:3.9.9-amazoncorretto-21
+      script: |
+        pwd
+        ls -la
+        cd $(workspaces.source.path)
+        mvn clean package
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: docker-build
+  namespace: ci-cd
+spec:
+  params:
+    - name: IMAGE
+      description: The name of the image to build and push
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: docker-build-and-push
+      image: docker:20.10-dind
+      securityContext:
+        privileged: true
+      script: |
+        # Start the Docker daemon in the background
+        dockerd --host=tcp://0.0.0.0:2375 --host=unix:///var/run/docker.sock --insecure-registry=docker-registry.ci-cd.svc.cluster.local:5000 &> /dev/null &
+        for i in $(seq 1 30); do
+          if docker info >/dev/null 2>&1; then
+            echo "Docker is running."
+            break
+          fi
+          echo "Waiting for Docker to start..."
+          sleep 1
+        done
+        echo "Docker started successfully!"
+        docker login -u admin -p password docker-registry.ci-cd.svc.cluster.local:5000
+        docker build -t $(params.IMAGE) $(workspaces.source.path)
+        docker push $(params.IMAGE)
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+  volumes:
+    - name: docker-sock
+      emptyDir: { }
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: java-build-pipeline-run
+  namespace: ci-cd
+spec:
+  pipelineRef:
+    name: java-build-pipeline
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce # access mode may affect how you can use this volume in parallel tasks
+          resources:
+            requests:
+              storage: 3Gi

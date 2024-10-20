@@ -2,18 +2,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-    name: {{ .Values.applicationName }}-dev
+    name: {{ .Values.applicationName }}
     namespace: {{ .Values.global.clusterConfigNamespace }}
 spec:
     project: default
     source:
       repoURL: 'https://github.com/davidezacchino/{{ .Values.applicationName }}-infra.git'
       path: 'helm-chart'
-      targetRevision: develop
+      targetRevision: main
       helm:
         valueFiles:
           - values.yaml
-          - values-dev.yaml
     destination:
       server: 'https://kubernetes.default.svc'
       namespace: {{ .Values.global.clusterConfigNamespace }}
