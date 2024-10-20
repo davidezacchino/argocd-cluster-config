@@ -1,0 +1,2 @@
+global:
+  clusterConfigNamespace: ci-cd

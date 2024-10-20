@@ -1,0 +1,24 @@
+{{- define "common.application-dev" -}}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    name: {{ .Values.applicationName }}-dev
+    namespace: {{ .Values.global.clusterConfigNamespace }}
+spec:
+    project: default
+    source:
+      repoURL: 'https://github.com/davidezacchino/{{ .Values.applicationName }}-infra.git'
+      path: 'helm-chart'
+      targetRevision: develop
+      helm:
+        valueFiles:
+          - values.yaml
+          - values-dev.yaml
+    destination:
+      server: 'https://kubernetes.default.svc'
+      namespace: {{ .Values.global.clusterConfigNamespace }}
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+{{- end -}}
