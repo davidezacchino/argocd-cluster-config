@@ -23,7 +23,7 @@ spec:
         - maven-build
       params:
         - name: IMAGE
-          value: "docker-registry.ci-cd.svc.cluster.local:5000/argocd-springboot-service:latest"
+          value: "docker.io/davidezacchino/argocd-springboot-service:latest"
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -78,9 +78,20 @@ spec:
       image: docker:20.10-dind
       securityContext:
         privileged: true
+      env:
+        - name: USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: docker-hub
+              key: username
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: docker-hub
+              key: password
       script: |
         # Start the Docker daemon in the background
-        dockerd --host=tcp://0.0.0.0:2375 --host=unix:///var/run/docker.sock --insecure-registry=docker-registry.ci-cd.svc.cluster.local:5000 &> /dev/null &
+        dockerd --host=tcp://0.0.0.0:2375 --host=unix:///var/run/docker.sock &> /dev/null &
         for i in $(seq 1 30); do
           if docker info >/dev/null 2>&1; then
             echo "Docker is running."
@@ -90,7 +101,9 @@ spec:
           sleep 1
         done
         echo "Docker started successfully!"
-        docker login -u admin -p password docker-registry.ci-cd.svc.cluster.local:5000
+        echo $USERNAME
+        echo $PASSWORD
+        docker login -u $USERNAME -p $PASSWORD
         docker build -t $(params.IMAGE) $(workspaces.source.path)
         docker push $(params.IMAGE)
       volumeMounts:
