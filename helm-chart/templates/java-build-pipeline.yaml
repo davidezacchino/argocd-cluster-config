@@ -4,15 +4,20 @@ metadata:
   name: java-build-pipeline
   namespace: ci-cd
 spec:
+  params:
+    - name: project
+      type: string
+      description: the project name on git
+      default: "argocd-springboot-service"
   tasks:
     - name: maven-build
       taskRef:
         name: maven-build
       params:
-        - name: url
-          value: "https://github.com/davidezacchino/argocd-springboot-service.git"
         - name: revision
           value: "main"
+        - name: project
+          value: $(params.project)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -22,8 +27,23 @@ spec:
       runAfter:
         - maven-build
       params:
-        - name: IMAGE
-          value: "docker.io/davidezacchino/argocd-springboot-service:latest"
+        - name: tag
+          value: $(tasks.maven-build.results.tag)
+        - name: project
+          value: $(params.project)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    - name: update-infra
+      runAfter:
+        - docker-build
+      taskRef:
+        name: update-infra
+      params:
+        - name: revision
+          value: "main"
+        - name: project
+          value: $(params.project)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -37,13 +57,17 @@ metadata:
   namespace: ci-cd
 spec:
   params:
-    - name: url
-      description: The git repository URL to clone
+    - name: project
+      description: name of the image which needs to be created
+      default: "argocd-springboot-service"
       type: string
     - name: revision
       description: Git revision to checkout (branch, tag, commit SHA)
       default: "main"
       type: string
+  results:
+    - name: tag
+      description: tag of the image
   workspaces:
     - name: source
   steps:
@@ -51,8 +75,10 @@ spec:
       image: alpine/git
       script: |
         cd $(workspaces.source.path)
-        git clone $(params.url) $(workspaces.source.path)
+        git clone https://github.com/davidezacchino/$(params.project).git $(workspaces.source.path)
         git checkout $(params.revision)
+        IMAGE_TAG=$(git rev-parse HEAD)
+        echo -n "${IMAGE_TAG}" > "$(results.tag.path)"
     - name: maven
       image: maven:3.9.9-amazoncorretto-21
       script: |
@@ -68,8 +94,13 @@ metadata:
   namespace: ci-cd
 spec:
   params:
-    - name: IMAGE
+    - name: project
+      description: name of the image which needs to be created
+      default: "argocd-springboot-service"
+      type: string
+    - name: tag
       description: The name of the image to build and push
+      default: ""
       type: string
   workspaces:
     - name: source
@@ -101,17 +132,52 @@ spec:
           sleep 1
         done
         echo "Docker started successfully!"
-        echo $USERNAME
-        echo $PASSWORD
         docker login -u $USERNAME -p $PASSWORD
-        docker build -t $(params.IMAGE) $(workspaces.source.path)
-        docker push $(params.IMAGE)
+        docker build -t docker.io/davidezacchino/$(params.project):$(params.tag) $(workspaces.source.path)
+        docker push docker.io/davidezacchino/$(params.project):$(params.tag)
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run
   volumes:
     - name: docker-sock
       emptyDir: { }
+---
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: update-infra
+  namespace: ci-cd
+spec:
+  params:
+    - name: project
+      description: name of the image which needs to be created
+      default: "argocd-springboot-service"
+      type: string
+    - name: revision
+      description: Git revision to checkout (branch, tag, commit SHA)
+      default: "main"
+      type: string
+    - name: tag
+      description: tag of the image
+      default: ""
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: update
+      image: alpine/git
+      script: |
+        cd $(workspaces.source.path)
+        rm -rf *
+        git clone https://github.com/davidezacchino/$(params.project)-infra.git $(workspaces.source.path)
+        git checkout $(params.revision)
+        cd helm-chart
+        sed -i "/imageTag/c\imageTag: '$(params.tag)'" values.yaml
+        git add values.yaml
+        git commit -m "update to version $(params.tag)"
+        git push
+        echo "Push succesfully done. Starting argoCd Sync"
 ---
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
