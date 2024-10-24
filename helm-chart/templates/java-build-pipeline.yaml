@@ -44,6 +44,8 @@ spec:
           value: "main"
         - name: project
           value: $(params.project)
+        - name: tag
+          value: $(tasks.maven-build.results.tag)
       workspaces:
         - name: source
           workspace: shared-workspace
@@ -142,7 +144,6 @@ spec:
     - name: docker-sock
       emptyDir: { }
 ---
----
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
@@ -167,13 +168,22 @@ spec:
   steps:
     - name: update
       image: alpine/git
+      env:
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: github
+              key: password
       script: |
         cd $(workspaces.source.path)
-        rm -rf *
-        git clone https://github.com/davidezacchino/$(params.project)-infra.git $(workspaces.source.path)
+        git clone https://$PASSWORD@github.com/davidezacchino/$(params.project)-infra.git $(workspaces.source.path)/infra
+        cd infra
         git checkout $(params.revision)
         cd helm-chart
         sed -i "/imageTag/c\imageTag: '$(params.tag)'" values.yaml
+        git config --global user.email "davide.zacchino@adesso.it"
+        git config --global user.name "davidezacchino"
+        git config --global user.password $PASSWORD
         git add values.yaml
         git commit -m "update to version $(params.tag)"
         git push
